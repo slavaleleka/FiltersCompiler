@@ -27,7 +27,7 @@ module.exports = (() => {
     const WARNING_TYPES = {
         MISSED_FILES: 'missed files',
         NO_MESSAGES: 'empty file or no messages in file',
-        INVALID_DATA_OBJ: 'invalid message key or no value',
+        INVALID_DATA_OBJ: 'invalid or absent message key/value',
     };
 
     /**
