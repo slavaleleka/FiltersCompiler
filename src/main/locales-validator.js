@@ -34,13 +34,7 @@ module.exports = (() => {
      * Sync reads file content
      * @param filePath - path to locales file
      */
-    const readFile = function (filePath) {
-        try {
-            return fs.readFileSync(path.resolve(__dirname, filePath), 'utf8');
-        } catch (e) {
-            return null;
-        }
-    };
+    const readFile = (filePath) => fs.readFileSync(path.resolve(__dirname, filePath), 'utf8');
 
     /**
      * Sync reads directory content
@@ -82,7 +76,7 @@ module.exports = (() => {
      * @param {Object} obj iterable locales messages object
      * @returns {Array}
      */
-    const objToDetails = (obj) => {
+    const prepareWarningDetails = (obj) => {
         const details = Object.keys(obj)
             .reduce((acc, key) => {
                 acc.push(`"${key}": "${obj[key]}"`);
@@ -191,7 +185,7 @@ module.exports = (() => {
                     const id = fileName.slice(0, -extensionLength);
                     if (!areValidMessagesKeys(messagesKeys, id)
                         || !areValidMessagesValues(messagesValues)) {
-                        localeWarnings.push([WARNING_TYPES.INVALID_DATA_OBJ, objToDetails(obj)]);
+                        localeWarnings.push([WARNING_TYPES.INVALID_DATA_OBJ, prepareWarningDetails(obj)]);
                     }
                 });
             });
