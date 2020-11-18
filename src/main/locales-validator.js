@@ -20,14 +20,19 @@ module.exports = (() => {
         },
     };
 
+    const WARNING_TYPES = {
+        MISSED_FILES: 'missed files',
+        NO_MESSAGES: 'empty file or no messages in file',
+        INVALID_DATA_OBJ: 'invalid message key or no value',
+    };
+
     /**
      * Sync reads file content
-     *
      * @param filePath - path to locales file
      */
     const readFile = function (filePath) {
         try {
-            return fs.readFileSync(path.resolve(__dirname, filePath), { encoding: 'utf8' });
+            return fs.readFileSync(path.resolve(__dirname, filePath), 'utf8');
         } catch (e) {
             return null;
         }
@@ -35,22 +40,20 @@ module.exports = (() => {
 
     /**
      * Sync reads directory content
-     *
      * @param dirPath - path to directory
      */
-    const readDir = (dirPath) => {
-        try {
-            return fs.readdirSync(path.resolve(__dirname, dirPath), { encoding: 'utf8' });
-        } catch (e) {
-            return null;
-        }
-    };
+    const readDir = (dirPath) => fs.readdirSync(path.resolve(__dirname, dirPath), 'utf8');
 
-    const validateMessagesKeys = (keys, id) => {
+    /**
+     * Validates messages keys
+     * @param {Array} keys locale messages keys
+     * @param {string} id filters / groups / tags
+     */
+    const areValidMessagesKeys = (keys, id) => {
         if (keys.length !== LOCALES_DATA[id].required.length) {
             return false;
         }
-        const isValidKeys = keys.reduce((acc, key) => {
+        const areValidKeys = keys.reduce((acc, key) => {
             const keyNameParts = key.split('.');
             const propPrefix = id.slice(0, -1);
             const filterId = Number(keyNameParts[1]);
@@ -62,20 +65,40 @@ module.exports = (() => {
                 && acc;
         }, true);
 
-        return isValidKeys;
+        return areValidKeys;
     };
 
-    const isValidValues = (values) => values.every((v) => v !== '');
+    const areValidMessagesValues = (values) => values.every((v) => v !== '');
 
-    const formatElData = (locale, obj) => {
-        const elData = [];
-        elData.push(`${locale} -- invalid message key or no value:`);
-        const keys = Object.keys(obj);
-        keys.forEach((key) => {
-            elData.push(`    "${key}": "${obj[key]}"`);
+    const objToDetails = (obj) => {
+        const details = Object.keys(obj)
+            .reduce((acc, key) => {
+                acc.push(`"${key}": "${obj[key]}"`);
+                return acc;
+            }, []);
+        return details;
+    };
+
+    const prepareWarnings = (warnings) => {
+        const output = warnings
+            .reduce((acc, data) => {
+                const [type, details] = data;
+                acc.push({ type, details });
+                return acc;
+            }, []);
+        return output;
+    };
+
+    const logResults = (results) => {
+        results.forEach((res) => {
+            logger.error(`- ${res.locale}:`);
+            res.warnings.forEach((warning) => {
+                logger.error(`  - ${warning.type}:`);
+                warning.details.forEach((detail) => {
+                    logger.error(`      ${detail}`);
+                });
+            });
         });
-        elData.push('');
-        return elData.join('\n');
     };
 
     /**
@@ -84,52 +107,78 @@ module.exports = (() => {
      */
     const validate = (dirPath) => {
         logger.info('Validating locales...');
-        const result = [];
-        const locales = readDir(dirPath);
-        const dataKeys = Object.keys(LOCALES_DATA);
-        const requiredFilesList = dataKeys
+        const results = [];
+        let locales;
+        try {
+            locales = readDir(dirPath);
+        } catch (e) {
+            throw new Error(`There is no locales dir '${dirPath}'`);
+        }
+
+        if (locales.length === 0) {
+            throw new Error(`Locales dir '${dirPath}' is empty`);
+        }
+
+        const requiredFiles = Object.keys(LOCALES_DATA)
             .map((el) => `${el}${LOCALES_FILE_EXTENSION}`);
 
         locales.forEach((locale) => {
+            const localeWarnings = [];
             const filesList = readDir(path.join(dirPath, locale));
             // checks all needed files presence
-            const filteredList = requiredFilesList
+            const missedFiles = requiredFiles
                 .filter((el) => !filesList.includes(el));
-            if (filteredList.length !== 0) {
-                result.push(`${locale} -- missed files: ${filteredList.join(' ')}`);
-                result.push('');
+            if (missedFiles.length !== 0) {
+                localeWarnings.push([WARNING_TYPES.MISSED_FILES, missedFiles]);
             }
 
-            dataKeys.forEach((id) => {
-                const fileName = `${id}${LOCALES_FILE_EXTENSION}`;
+            const presentFiles = requiredFiles
+                .filter((el) => !missedFiles.includes(el));
+
+            presentFiles.forEach((fileName) => {
                 const messagesPath = path.join(dirPath, locale, fileName);
-                const messagesData = JSON.parse(readFile(messagesPath));
-                // skip if no messagesData found, probably there is no file
-                // and that should be written to 'result'
-                if (messagesData === null) {
+                let messagesData;
+                try {
+                    messagesData = JSON.parse(readFile(messagesPath));
+                } catch (e) {
+                    localeWarnings.push([WARNING_TYPES.NO_MESSAGES, [fileName]]);
                     return;
                 }
-                messagesData.forEach((el) => {
-                    const messagesKeys = Object.keys(el);
-                    const messagesValues = Object.values(el);
-                    const isValidKeys = validateMessagesKeys(messagesKeys, id);
-                    if (!isValidKeys || !isValidValues(messagesValues)) {
-                        result.push(formatElData(locale, el));
+
+                if (messagesData.length === 0) {
+                    localeWarnings.push([WARNING_TYPES.NO_MESSAGES, [fileName]]);
+                }
+
+                messagesData.forEach((obj) => {
+                    const messagesKeys = Object.keys(obj);
+                    const messagesValues = Object.values(obj);
+                    const extensionLength = LOCALES_FILE_EXTENSION.length;
+                    const id = fileName.slice(0, -extensionLength);
+                    if (!areValidMessagesKeys(messagesKeys, id)
+                        || !areValidMessagesValues(messagesValues)) {
+                        localeWarnings.push([WARNING_TYPES.INVALID_DATA_OBJ, objToDetails(obj)]);
                     }
                 });
             });
+
+            if (localeWarnings.length !== 0) {
+                const warnings = prepareWarnings(localeWarnings);
+                const localeResult = {
+                    locale,
+                    warnings,
+                };
+                results.push(localeResult);
+            }
         });
 
-        if (result.length === 0) {
+        if (results.length === 0) {
             logger.info('Validation result: OK');
         } else {
             logger.error('There are issues with:');
-            result.forEach((r) => {
-                logger.error(r);
-            });
+            logResults(results);
         }
 
-        return result;
+        return results;
     };
 
     return {
