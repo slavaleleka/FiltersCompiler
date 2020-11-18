@@ -8,6 +8,10 @@ module.exports = (() => {
     const ONLY_NAME_REQUIRED_ENDINGS = ['name'];
     const LOCALES_FILE_EXTENSION = '.json';
 
+    // each message key should consist of three parts
+    // e.g. 'filter.3.name' or 'tag.29.description'
+    const MESSAGE_KEY_NAME_PARTS_COUNT = 3;
+
     const LOCALES_DATA = {
         filters: {
             required: FULL_REQUIRED_ENDINGS,
@@ -53,23 +57,31 @@ module.exports = (() => {
         if (keys.length !== LOCALES_DATA[id].required.length) {
             return false;
         }
-        const areValidKeys = keys.reduce((acc, key) => {
-            const keyNameParts = key.split('.');
-            const propPrefix = id.slice(0, -1);
-            const filterId = Number(keyNameParts[1]);
-            return keyNameParts.length === 3
-                && keyNameParts[0] === propPrefix
-                && Number.isInteger(filterId)
-                && filterId > 0
-                && LOCALES_DATA[id].required.includes(keyNameParts[2])
-                && acc;
-        }, true);
-
+        const areValidKeys = !keys
+            .find((key) => {
+                const keyNameParts = key.split('.');
+                const propPrefix = id.slice(0, -1);
+                const filterId = Number(keyNameParts[1]);
+                return keyNameParts.length !== MESSAGE_KEY_NAME_PARTS_COUNT
+                    || keyNameParts[0] !== propPrefix
+                    || !(Number.isInteger(filterId))
+                    || !(filterId > 0)
+                    || !(LOCALES_DATA[id].required.includes(keyNameParts[2]));
+            });
         return areValidKeys;
     };
 
+    /**
+     * Validates locale messages values
+     * @param {string[]} values
+     */
     const areValidMessagesValues = (values) => values.every((v) => v !== '');
 
+    /**
+     * Prepares invalid locales data object for results
+     * @param {Object} obj iterable locales messages object
+     * @returns {Array}
+     */
     const objToDetails = (obj) => {
         const details = Object.keys(obj)
             .reduce((acc, key) => {
@@ -79,6 +91,11 @@ module.exports = (() => {
         return details;
     };
 
+    /**
+     * Prepares raw warnings for results
+     * @param {Array[]} warnings collected raw warnings
+     * @returns {Warning[]}
+     */
     const prepareWarnings = (warnings) => {
         const output = warnings
             .reduce((acc, data) => {
@@ -89,6 +106,22 @@ module.exports = (() => {
         return output;
     };
 
+    /**
+     * @typedef {Object} Warning
+     * @property {string} type
+     * @property {string[]} details
+     */
+
+    /**
+     * @typedef {Object} Result
+     * @property {string} locale
+     * @property {Warning[]} warnings
+     */
+
+    /**
+     * Logs collected results of locales validation
+     * @param {Result[]} results
+     */
     const logResults = (results) => {
         results.forEach((res) => {
             logger.error(`- ${res.locale}:`);
@@ -104,6 +137,7 @@ module.exports = (() => {
     /**
      * Validates locales messages
      * @param {string} dirPath relative path to locales directory
+     * @returns {Result[]}
      */
     const validate = (dirPath) => {
         logger.info('Validating locales...');
@@ -135,6 +169,7 @@ module.exports = (() => {
             const presentFiles = requiredFiles
                 .filter((el) => !missedFiles.includes(el));
 
+            // iterate over existent files
             presentFiles.forEach((fileName) => {
                 const messagesPath = path.join(dirPath, locale, fileName);
                 let messagesData;
@@ -163,11 +198,7 @@ module.exports = (() => {
 
             if (localeWarnings.length !== 0) {
                 const warnings = prepareWarnings(localeWarnings);
-                const localeResult = {
-                    locale,
-                    warnings,
-                };
-                results.push(localeResult);
+                results.push({ locale, warnings });
             }
         });
 
